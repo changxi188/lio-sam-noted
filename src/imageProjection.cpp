@@ -575,7 +575,6 @@ public:
         {
             // 这个scan可以计算曲率的起始点（计算曲率需要左右各五个点）
             cloudInfo.startRingIndex[i] = count - 1 + 5;
-            std::cout << "scan id : " << i << ", count : " << count << std::endl;
 
             for (int j = 0; j < Horizon_SCAN; ++j)
             {

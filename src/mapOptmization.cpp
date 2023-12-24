@@ -240,51 +240,6 @@ public:
         matP = cv::Mat(6, 6, CV_32F, cv::Scalar::all(0));
     }
 
-    void laserCloudInfoHandler(const lio_sam::cloud_infoConstPtr& msgIn)
-    {
-        // extract time stamp
-        // 提取当前时间戳
-        timeLaserInfoStamp = msgIn->header.stamp;
-        timeLaserInfoCur   = msgIn->header.stamp.toSec();
-
-        // extract info and feature cloud
-        // 提取cloudinfo中的角点和面点
-        cloudInfo = *msgIn;
-        pcl::fromROSMsg(msgIn->cloud_corner, *laserCloudCornerLast);
-        pcl::fromROSMsg(msgIn->cloud_surface, *laserCloudSurfLast);
-
-        std::lock_guard<std::mutex> lock(mtx);
-
-        static double timeLastProcessing = -1;
-        // 控制后端频率，两帧处理一帧
-        if (timeLaserInfoCur - timeLastProcessing >= mappingProcessInterval)
-        {
-            timeLastProcessing = timeLaserInfoCur;
-            // 更新当前匹配结果的初始位姿
-            updateInitialGuess();
-            // 提取当前帧相关的关键帧并且构建点云局部地图
-            extractSurroundingKeyFrames();
-            // 对当前帧进行下采样
-            downsampleCurrentScan();
-            // 对点云配准进行优化问题构建求解
-            scan2MapOptimization();
-            // 根据配准结果确定是否是关键帧
-            saveKeyFramesAndFactor();
-            // 调整全局轨迹
-            correctPoses();
-            // 将lidar里程记信息发送出去
-            publishOdometry();
-            // 发送可视化点云信息
-            publishFrames();
-        }
-    }
-
-    // 收集gps信息
-    void gpsHandler(const nav_msgs::Odometry::ConstPtr& gpsMsg)
-    {
-        gpsQueue.push_back(*gpsMsg);
-    }
-
     void pointAssociateToMap(PointType const* const pi, PointType* const po)
     {
         po->x = transPointAssociateToMap(0, 0) * pi->x + transPointAssociateToMap(0, 1) * pi->y +
@@ -545,20 +500,6 @@ public:
             performLoopClosure();
             visualizeLoopClosure();
         }
-    }
-
-    // 接收外部告知的回环信息
-    void loopInfoHandler(const std_msgs::Float64MultiArray::ConstPtr& loopMsg)
-    {
-        std::lock_guard<std::mutex> lock(mtxLoopInfo);
-        // 回环信息必须是配对的，因此大小检查一下是不是2
-        if (loopMsg->data.size() != 2)
-            return;
-        // 把当前回环信息送进队列
-        loopInfoVec.push_back(*loopMsg);
-        // 如果队列里回环信息太多没有处理，就把老的回环信息扔掉
-        while (loopInfoVec.size() > 5)
-            loopInfoVec.pop_front();
     }
 
     void performLoopClosure()
@@ -2013,6 +1954,65 @@ public:
             globalPath.header.frame_id = odometryFrame;
             pubPath.publish(globalPath);
         }
+    }
+
+    void laserCloudInfoHandler(const lio_sam::cloud_infoConstPtr& msgIn)
+    {
+        // extract time stamp
+        // 提取当前时间戳
+        timeLaserInfoStamp = msgIn->header.stamp;
+        timeLaserInfoCur   = msgIn->header.stamp.toSec();
+
+        // extract info and feature cloud
+        // 提取cloudinfo中的角点和面点
+        cloudInfo = *msgIn;
+        pcl::fromROSMsg(msgIn->cloud_corner, *laserCloudCornerLast);
+        pcl::fromROSMsg(msgIn->cloud_surface, *laserCloudSurfLast);
+
+        std::lock_guard<std::mutex> lock(mtx);
+
+        static double timeLastProcessing = -1;
+        // 控制后端频率，两帧处理一帧
+        if (timeLaserInfoCur - timeLastProcessing >= mappingProcessInterval)
+        {
+            timeLastProcessing = timeLaserInfoCur;
+            // 更新当前匹配结果的初始位姿
+            updateInitialGuess();
+            // 提取当前帧相关的关键帧并且构建点云局部地图
+            extractSurroundingKeyFrames();
+            // 对当前帧进行下采样
+            downsampleCurrentScan();
+            // 对点云配准进行优化问题构建求解
+            scan2MapOptimization();
+            // 根据配准结果确定是否是关键帧
+            saveKeyFramesAndFactor();
+            // 调整全局轨迹
+            correctPoses();
+            // 将lidar里程记信息发送出去
+            publishOdometry();
+            // 发送可视化点云信息
+            publishFrames();
+        }
+    }
+
+    // 收集gps信息
+    void gpsHandler(const nav_msgs::Odometry::ConstPtr& gpsMsg)
+    {
+        gpsQueue.push_back(*gpsMsg);
+    }
+
+    // 接收外部告知的回环信息
+    void loopInfoHandler(const std_msgs::Float64MultiArray::ConstPtr& loopMsg)
+    {
+        std::lock_guard<std::mutex> lock(mtxLoopInfo);
+        // 回环信息必须是配对的，因此大小检查一下是不是2
+        if (loopMsg->data.size() != 2)
+            return;
+        // 把当前回环信息送进队列
+        loopInfoVec.push_back(*loopMsg);
+        // 如果队列里回环信息太多没有处理，就把老的回环信息扔掉
+        while (loopInfoVec.size() > 5)
+            loopInfoVec.pop_front();
     }
 };
 
