@@ -488,8 +488,11 @@ public:
     void loopClosureThread()
     {
         // 如果不需要进行回环检测，那么就退出这个线程
-        if (loopClosureEnableFlag == false)
+        if (!loopClosureEnableFlag)
+        {
             return;
+        }
+
         // 设置回环检测的频率
         ros::Rate rate(loopClosureFrequency);
         while (ros::ok())
@@ -1057,104 +1060,104 @@ public:
             cv::Mat matD1(1, 3, CV_32F, cv::Scalar::all(0));
             cv::Mat matV1(3, 3, CV_32F, cv::Scalar::all(0));
             // 计算找到的点中距离当前点最远的点，如果距离太大那说明这个约束不可信，就跳过
-            if (pointSearchSqDis[4] < 1.0)
+            if (pointSearchSqDis[4] >= 1.0)
             {
-                float cx = 0, cy = 0, cz = 0;
-                // 计算协方差矩阵
-                // 首先计算均值
-                for (int j = 0; j < 5; j++)
+                continue;
+            }
+
+            float cx = 0, cy = 0, cz = 0;
+            // 计算协方差矩阵
+            // 首先计算均值
+            for (int j = 0; j < 5; j++)
+            {
+                cx += laserCloudCornerFromMapDS->points[pointSearchInd[j]].x;
+                cy += laserCloudCornerFromMapDS->points[pointSearchInd[j]].y;
+                cz += laserCloudCornerFromMapDS->points[pointSearchInd[j]].z;
+            }
+            cx /= 5;
+            cy /= 5;
+            cz /= 5;
+
+            float a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0;
+            for (int j = 0; j < 5; j++)
+            {
+                float ax = laserCloudCornerFromMapDS->points[pointSearchInd[j]].x - cx;
+                float ay = laserCloudCornerFromMapDS->points[pointSearchInd[j]].y - cy;
+                float az = laserCloudCornerFromMapDS->points[pointSearchInd[j]].z - cz;
+
+                a11 += ax * ax;
+                a12 += ax * ay;
+                a13 += ax * az;
+                a22 += ay * ay;
+                a23 += ay * az;
+                a33 += az * az;
+            }
+            a11 /= 5;
+            a12 /= 5;
+            a13 /= 5;
+            a22 /= 5;
+            a23 /= 5;
+            a33 /= 5;
+
+            matA1.at<float>(0, 0) = a11;
+            matA1.at<float>(0, 1) = a12;
+            matA1.at<float>(0, 2) = a13;
+            matA1.at<float>(1, 0) = a12;
+            matA1.at<float>(1, 1) = a22;
+            matA1.at<float>(1, 2) = a23;
+            matA1.at<float>(2, 0) = a13;
+            matA1.at<float>(2, 1) = a23;
+            matA1.at<float>(2, 2) = a33;
+            // 特征值分解
+            cv::eigen(matA1, matD1, matV1);
+            // 这是线特征性，要求最大特征值大于3倍的次大特征值
+            if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1))
+            {
+                float x0 = pointSel.x;
+                float y0 = pointSel.y;
+                float z0 = pointSel.z;
+                // 特征向量对应的就是直线的方向向量
+                // 通过点的均值往两边拓展，构成一个线的两个端点
+                float x1 = cx + 0.1 * matV1.at<float>(0, 0);
+                float y1 = cy + 0.1 * matV1.at<float>(0, 1);
+                float z1 = cz + 0.1 * matV1.at<float>(0, 2);
+                float x2 = cx - 0.1 * matV1.at<float>(0, 0);
+                float y2 = cy - 0.1 * matV1.at<float>(0, 1);
+                float z2 = cz - 0.1 * matV1.at<float>(0, 2);
+                // 下面是计算点到线的残差和垂线方向（及雅克比方向）
+                float a012 = sqrt(
+                    ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) +
+                    ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) +
+                    ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1)) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1)));
+
+                float l12 = sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2) + (z1 - z2) * (z1 - z2));
+
+                float la = ((y1 - y2) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) +
+                            (z1 - z2) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1))) /
+                           a012 / l12;
+
+                float lb = -((x1 - x2) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) -
+                             (z1 - z2) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1))) /
+                           a012 / l12;
+
+                float lc = -((x1 - x2) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) +
+                             (y1 - y2) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1))) /
+                           a012 / l12;
+
+                float ld2 = a012 / l12;
+                // 一个简单的核函数，残差越大权重降低
+                float s = 1 - 0.9 * fabs(ld2);
+
+                coeff.x         = s * la;
+                coeff.y         = s * lb;
+                coeff.z         = s * lc;
+                coeff.intensity = s * ld2;
+                // 如果残差小于10cm，就认为是一个有效的约束
+                if (s > 0.1)
                 {
-                    cx += laserCloudCornerFromMapDS->points[pointSearchInd[j]].x;
-                    cy += laserCloudCornerFromMapDS->points[pointSearchInd[j]].y;
-                    cz += laserCloudCornerFromMapDS->points[pointSearchInd[j]].z;
-                }
-                cx /= 5;
-                cy /= 5;
-                cz /= 5;
-
-                float a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0;
-                for (int j = 0; j < 5; j++)
-                {
-                    float ax = laserCloudCornerFromMapDS->points[pointSearchInd[j]].x - cx;
-                    float ay = laserCloudCornerFromMapDS->points[pointSearchInd[j]].y - cy;
-                    float az = laserCloudCornerFromMapDS->points[pointSearchInd[j]].z - cz;
-
-                    a11 += ax * ax;
-                    a12 += ax * ay;
-                    a13 += ax * az;
-                    a22 += ay * ay;
-                    a23 += ay * az;
-                    a33 += az * az;
-                }
-                a11 /= 5;
-                a12 /= 5;
-                a13 /= 5;
-                a22 /= 5;
-                a23 /= 5;
-                a33 /= 5;
-
-                matA1.at<float>(0, 0) = a11;
-                matA1.at<float>(0, 1) = a12;
-                matA1.at<float>(0, 2) = a13;
-                matA1.at<float>(1, 0) = a12;
-                matA1.at<float>(1, 1) = a22;
-                matA1.at<float>(1, 2) = a23;
-                matA1.at<float>(2, 0) = a13;
-                matA1.at<float>(2, 1) = a23;
-                matA1.at<float>(2, 2) = a33;
-                // 特征值分解
-                cv::eigen(matA1, matD1, matV1);
-                // 这是线特征性，要求最大特征值大于3倍的次大特征值
-                if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1))
-                {
-                    float x0 = pointSel.x;
-                    float y0 = pointSel.y;
-                    float z0 = pointSel.z;
-                    // 特征向量对应的就是直线的方向向量
-                    // 通过点的均值往两边拓展，构成一个线的两个端点
-                    float x1 = cx + 0.1 * matV1.at<float>(0, 0);
-                    float y1 = cy + 0.1 * matV1.at<float>(0, 1);
-                    float z1 = cz + 0.1 * matV1.at<float>(0, 2);
-                    float x2 = cx - 0.1 * matV1.at<float>(0, 0);
-                    float y2 = cy - 0.1 * matV1.at<float>(0, 1);
-                    float z2 = cz - 0.1 * matV1.at<float>(0, 2);
-                    // 下面是计算点到线的残差和垂线方向（及雅克比方向）
-                    float a012 = sqrt(((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) *
-                                          ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) +
-                                      ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) *
-                                          ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) +
-                                      ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1)) *
-                                          ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1)));
-
-                    float l12 = sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2) + (z1 - z2) * (z1 - z2));
-
-                    float la = ((y1 - y2) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) +
-                                (z1 - z2) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1))) /
-                               a012 / l12;
-
-                    float lb = -((x1 - x2) * ((x0 - x1) * (y0 - y2) - (x0 - x2) * (y0 - y1)) -
-                                 (z1 - z2) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1))) /
-                               a012 / l12;
-
-                    float lc = -((x1 - x2) * ((x0 - x1) * (z0 - z2) - (x0 - x2) * (z0 - z1)) +
-                                 (y1 - y2) * ((y0 - y1) * (z0 - z2) - (y0 - y2) * (z0 - z1))) /
-                               a012 / l12;
-
-                    float ld2 = a012 / l12;
-                    // 一个简单的核函数，残差越大权重降低
-                    float s = 1 - 0.9 * fabs(ld2);
-
-                    coeff.x         = s * la;
-                    coeff.y         = s * lb;
-                    coeff.z         = s * lc;
-                    coeff.intensity = s * ld2;
-                    // 如果残差小于10cm，就认为是一个有效的约束
-                    if (s > 0.1)
-                    {
-                        laserCloudOriCornerVec[i]  = pointOri;
-                        coeffSelCornerVec[i]       = coeff;
-                        laserCloudOriCornerFlag[i] = true;
-                    }
+                    laserCloudOriCornerVec[i]  = pointOri;
+                    coeffSelCornerVec[i]       = coeff;
+                    laserCloudOriCornerFlag[i] = true;
                 }
             }
         }
@@ -1608,7 +1611,10 @@ public:
                 float noise_z = thisGPS.pose.covariance[14];
                 // 如果gps的置信度不高，也没有必要使用了
                 if (noise_x > gpsCovThreshold || noise_y > gpsCovThreshold)
+                {
                     continue;
+                }
+
                 // 取出gps的位置
                 float gps_x = thisGPS.pose.pose.position.x;
                 float gps_y = thisGPS.pose.pose.position.y;
@@ -1623,7 +1629,9 @@ public:
                 // GPS not properly initialized (0,0,0)
                 // gps的x或者y太小说明还没有初始化好
                 if (abs(gps_x) < 1e-6 && abs(gps_y) < 1e-6)
+                {
                     continue;
+                }
 
                 // Add GPS every a few meters
                 PointType curGPSPoint;
@@ -1632,9 +1640,13 @@ public:
                 curGPSPoint.z = gps_z;
                 // 加入gps观测不宜太频繁，相邻不超过5m
                 if (pointDistance(curGPSPoint, lastGPSPoint) < 5.0)
+                {
                     continue;
+                }
                 else
+                {
                     lastGPSPoint = curGPSPoint;
+                }
 
                 gtsam::Vector Vector3(3);
                 // gps的置信度，标准差设置成最小1m，也就是不会特别信任gps信号
@@ -1679,7 +1691,10 @@ public:
     {
         // 通过旋转和平移的增量来判断是否是关键帧
         if (saveFrame() == false)
+        {
             return;
+        }
+
         // 如果是关键帧就给isam增加因子
         // odom factor
         // 增加odom的因子
@@ -1777,36 +1792,38 @@ public:
         if (cloudKeyPoses3D->points.empty())
             return;
         // 只有回环以及gps信息这些会触发全局调整信息才会触发
-        if (aLoopIsClosed == true)
+        if (!aLoopIsClosed)
         {
-            // clear map cache
-            // 很多位姿会变化，因子之前的容器内转到世界坐标系下的很多点云就需要调整，因此这里索性清空
-            laserCloudMapContainer.clear();
-            // clear path
-            // 清空path
-            globalPath.poses.clear();
-            // update key poses
-            // 然后更新所有的位姿
-            int numPoses = isamCurrentEstimate.size();
-            for (int i = 0; i < numPoses; ++i)
-            {
-                // 更新所有关键帧的位姿
-                cloudKeyPoses3D->points[i].x = isamCurrentEstimate.at<Pose3>(i).translation().x();
-                cloudKeyPoses3D->points[i].y = isamCurrentEstimate.at<Pose3>(i).translation().y();
-                cloudKeyPoses3D->points[i].z = isamCurrentEstimate.at<Pose3>(i).translation().z();
-
-                cloudKeyPoses6D->points[i].x     = cloudKeyPoses3D->points[i].x;
-                cloudKeyPoses6D->points[i].y     = cloudKeyPoses3D->points[i].y;
-                cloudKeyPoses6D->points[i].z     = cloudKeyPoses3D->points[i].z;
-                cloudKeyPoses6D->points[i].roll  = isamCurrentEstimate.at<Pose3>(i).rotation().roll();
-                cloudKeyPoses6D->points[i].pitch = isamCurrentEstimate.at<Pose3>(i).rotation().pitch();
-                cloudKeyPoses6D->points[i].yaw   = isamCurrentEstimate.at<Pose3>(i).rotation().yaw();
-                // 同时更新path
-                updatePath(cloudKeyPoses6D->points[i]);
-            }
-            // 标志位置位
-            aLoopIsClosed = false;
+            return;
         }
+
+        // clear map cache
+        // 很多位姿会变化，因子之前的容器内转到世界坐标系下的很多点云就需要调整，因此这里索性清空
+        laserCloudMapContainer.clear();
+        // clear path
+        // 清空path
+        globalPath.poses.clear();
+        // update key poses
+        // 然后更新所有的位姿
+        int numPoses = isamCurrentEstimate.size();
+        for (int i = 0; i < numPoses; ++i)
+        {
+            // 更新所有关键帧的位姿
+            cloudKeyPoses3D->points[i].x = isamCurrentEstimate.at<Pose3>(i).translation().x();
+            cloudKeyPoses3D->points[i].y = isamCurrentEstimate.at<Pose3>(i).translation().y();
+            cloudKeyPoses3D->points[i].z = isamCurrentEstimate.at<Pose3>(i).translation().z();
+
+            cloudKeyPoses6D->points[i].x     = cloudKeyPoses3D->points[i].x;
+            cloudKeyPoses6D->points[i].y     = cloudKeyPoses3D->points[i].y;
+            cloudKeyPoses6D->points[i].z     = cloudKeyPoses3D->points[i].z;
+            cloudKeyPoses6D->points[i].roll  = isamCurrentEstimate.at<Pose3>(i).rotation().roll();
+            cloudKeyPoses6D->points[i].pitch = isamCurrentEstimate.at<Pose3>(i).rotation().pitch();
+            cloudKeyPoses6D->points[i].yaw   = isamCurrentEstimate.at<Pose3>(i).rotation().yaw();
+            // 同时更新path
+            updatePath(cloudKeyPoses6D->points[i]);
+        }
+        // 标志位置位
+        aLoopIsClosed = false;
     }
 
     void updatePath(const PointTypePose& pose_in)
